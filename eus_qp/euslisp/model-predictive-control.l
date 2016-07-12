@@ -95,6 +95,8 @@
           state-value-list ;; Result state value list
           output-value-list ;; Result output value list
           error-weight-vector
+          receding-horizon-proc-count
+          counter
           )
   )
 
@@ -105,6 +107,7 @@
          ((:output-dim tmp-output-dim) 0)
          (error-weight-vector (fill (instantiate float-vector tmp-state-dim) 1.0))
          (output-weight-vector (fill (instantiate float-vector tmp-output-dim) 1.0))
+         ((:receding-horizon-proc-count rhpc) 2)
          )
    "Model Predictive Control initialization for linear time-variant system."
    (setq preview-window tmp-preview-window
@@ -112,6 +115,8 @@
    (setq current-state initial-state)
    (setq error-weight-matrix (send self :calc-weight-matrix-for-preview-window error-weight-vector preview-window))
    (setq output-weight-matrix (send self :calc-weight-matrix-for-preview-window output-weight-vector preview-window))
+   (setq receding-horizon-proc-count rhpc)
+   (setq counter 0)
    self)
   (:calc-total-system-matrix ;; A
    (Ak-list) ;; Ak = system matrix
@@ -240,7 +245,8 @@
            )))
      mat))
   (:proc-model-predictive-control
-   (&key (calc-state-value-list t) (solve-qp-mode :qp))
+;;   (&key (calc-state-value-list t) (solve-qp-mode :qp))
+   (&key (calc-state-value-list t) (solve-qp-mode :sqp-with-hotstart))
    "Solve QP for one predictive control calculation."
    ;; Parameter list for all k = 0, ..., N-1
    (let* ((system-matrix-list (mapcar #'(lambda (x) (send x :system-matrix)) param-list))
@@ -278,6 +284,7 @@
                                            (send self :calc-total-output-drift-matrix system-matrix-list output-matrix-list)))
             (no-input-value (every #'null input-matrix-list)) ;; e.g., in the air
             (tmp-input-state-value))
+       (when (= (mod counter receding-horizon-proc-count) 0)
        (unless no-input-value
          (let* (;; B
                (total-input-matrix (send self :calc-total-input-matrix system-matrix-list input-matrix-list))
@@ -346,9 +353,10 @@
                   :solve-qp-mode solve-qp-mode
                   ;;:print-level :pl-low
                   )
-                 tmp-input-state-value (transform total-input-matrix total-input-value-vector))))
+                 tmp-input-state-value (transform total-input-matrix total-input-value-vector)))))
        ;;(format t ";; no-input ~A, use-drift ~A, use-output ~A~%" no-input-value use-drift-coeff use-output-matrix)
        ;; Calculate X and x_1,... and u_0, ...
+       (when (= (mod counter receding-horizon-proc-count) 0)
        (when calc-state-value-list
          (let ((state-values (if no-input-value
                                  (transform total-system-matrix current-state)
@@ -373,8 +381,14 @@
            (setq input-value-list (reverse input-value-list) state-value-list (reverse state-value-list))
            (if use-output-matrix
                (setq output-value-list (reverse output-value-list)))
-           (setq current-state (car state-value-list))
-           ))
+           )))
+       ;;
+       (when calc-state-value-list
+         (setq current-state (elt state-value-list (mod counter receding-horizon-proc-count)))
+         (Setq input-value-list (subseq input-value-list (if (= (mod counter receding-horizon-proc-count) 0) 0 1)))
+         (Setq state-value-list (subseq state-value-list (if (= (mod counter receding-horizon-proc-count) 0) 0 1)))
+         )
+       (incf counter)
        total-input-value-vector
        )))
   (:set-param-list
