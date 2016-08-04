@@ -100,6 +100,15 @@
           )
   )
 
+(defun submatrix (mat start-row start-col row-len col-len)
+  (let ((rr (array-dimension mat 0))
+        (cc (array-dimension mat 1))
+        vl)
+    (dotimes (i row-len)
+      (push (subseq (matrix-row mat (+ i start-row)) start-col (+ start-col col-len)) vl)
+      )
+    (make-matrix row-len col-len (nreverse vl))))
+
 (defmethod model-predictive-control
   (:init
    (tmp-preview-window tmp-state-dim
@@ -108,6 +117,7 @@
          (error-weight-vector (fill (instantiate float-vector tmp-state-dim) 1.0))
          (output-weight-vector (fill (instantiate float-vector tmp-output-dim) 1.0))
          ((:receding-horizon-proc-count rhpc) 2)
+         ;;((:receding-horizon-proc-count rhpc) 1)
          )
    "Model Predictive Control initialization for linear time-variant system."
    (setq preview-window tmp-preview-window
@@ -266,6 +276,37 @@
           (use-drift-coeff (and drift-coeff-list (every #'identity drift-coeff-list)))
           (use-output-matrix (and (send (car param-list) :output-matrix) (send (car param-list) :reference-output)))
           )
+     ;;(print (mapcar #'(lambda (p) (p . contact-limbs)) param-list))
+     ;;(setq move-blocking-param (list 1 1 1 1 1 1 1 1 2))
+     ;;(setq move-blocking-param (list 1 1 1 1 1 1 1 1 2))
+     (setq move-blocking-param (list 1 1 1 1 2 4))
+     ;;(setq move-blocking-param (list 1 1 1 1 1 1 1 1 1 1))
+     ;; (print move-blocking-param)
+     ;; (print (find 'contact-limbs (mapcar #'car (send (car param-list) :slots))))
+     ;; (if (find 'contact-limbs (mapcar #'car (send (car param-list) :slots)))
+     ;;     (setq move-blocking-matrix (send self :calc-move-blocking-matrix move-blocking-param (send-all param-list :input-dim) (mapcar #'(lambda (p) (p . contact-limbs)) param-list)))
+     ;;   (setq move-blocking-matrix nil))
+     (Setq move-blocking-matrix nil)
+     ;;(format-array (submatrix move-blocking-matrix (* 4 6) (* 4 6) (- (car (array-dimensions move-blocking-matrix)) (* 4 6)) (- (cadr (array-dimensions move-blocking-matrix)) (* 4 6))))
+     ;;(format-array move-blocking-matrix)
+     (setq aa move-blocking-matrix)
+     ;; (if (find 'contact-limbs (mapcar #'car (send (car param-list) :slots)))
+     ;;     (print (list (mapcar #'(lambda (c) (c . contact-limbs)) param-list) (length ((car param-list) . contact-limbs)))))
+     ;; (let ((idx 0))
+     ;;   (setq inequality-matrix-list (mapcar #'(lambda (x)
+     ;;               (prog1
+     ;;                   (car (subseq inequality-matrix-list idx (+ idx x)))
+     ;;                 (setq idx (+ idx x))))
+     ;;           move-blocking-param)))
+     ;; (let ((idx 0))
+     ;;   (setq inequality-min-vector-list (mapcar #'(lambda (x)
+     ;;               (prog1
+     ;;                   (car (subseq inequality-min-vector-list idx (+ idx x)))
+     ;;                 (setq idx (+ idx x))))
+     ;;           move-blocking-param)))
+     ;;(read-line)
+     ;; (print (list ((car param-list) . contact-limbs) ((car param-list) . all-limbs)))
+     ;;(read-line)
      ;; Concatenate all parameter list for one matrix or one vector
      (let* (;; A
             (total-system-matrix (send self :calc-total-system-matrix system-matrix-list))
@@ -278,7 +319,10 @@
             ;; C
             (total-output-matrix (if use-output-matrix (send self :calc-total-output-matrix system-matrix-list output-matrix-list)))
             ;; D
-            (total-feedforward-matrix (if use-output-matrix (send self :calc-total-feedforward-matrix system-matrix-list input-matrix-list output-matrix-list feedforward-matrix-list)))
+            (total-feedforward-matrix (if use-output-matrix
+                                          (if move-blocking-matrix
+                                              (m* (send self :calc-total-feedforward-matrix system-matrix-list input-matrix-list output-matrix-list feedforward-matrix-list) move-blocking-matrix)
+                                            (send self :calc-total-feedforward-matrix system-matrix-list input-matrix-list output-matrix-list feedforward-matrix-list))))
             ;; F'
             (total-output-drift-matrix (if (and use-output-matrix use-drift-coeff)
                                            (send self :calc-total-output-drift-matrix system-matrix-list output-matrix-list)))
@@ -287,7 +331,9 @@
        (when (= (mod counter receding-horizon-proc-count) 0)
        (unless no-input-value
          (let* (;; B
-               (total-input-matrix (send self :calc-total-input-matrix system-matrix-list input-matrix-list))
+               (total-input-matrix (if move-blocking-matrix
+                                       (m* (send self :calc-total-input-matrix system-matrix-list input-matrix-list) move-blocking-matrix)
+                                     (send self :calc-total-input-matrix system-matrix-list input-matrix-list)))
                ;; X^{ref}
                (reference-state
                 (if use-drift-coeff
@@ -301,18 +347,25 @@
                       (apply #'concatenate float-vector reference-output-list))))
                ;; G
                (total-inequality-matrix (if (every #'identity inequality-matrix-list)
-                                            (apply #'concatenate-matrix-diagonal inequality-matrix-list)))
+                                            (if move-blocking-matrix
+                                                (m* (apply #'concatenate-matrix-diagonal inequality-matrix-list) move-blocking-matrix)
+                                              (apply #'concatenate-matrix-diagonal inequality-matrix-list))))
                ;; H
                (total-inequality-min-vector (if (every #'identity inequality-min-vector-list)
                                                 (apply #'concatenate float-vector inequality-min-vector-list)))
                ;; I
                (total-equality-matrix (if (every #'identity equality-matrix-list)
-                                          (apply #'concatenate-matrix-diagonal equality-matrix-list)))
+                                          (if move-blocking-matrix
+                                              (m* (apply #'concatenate-matrix-diagonal equality-matrix-list) move-blocking-matrix)
+                                            (apply #'concatenate-matrix-diagonal equality-matrix-list))))
                ;; J
                (total-equality-vector (if (every #'identity equality-vector-list)
                                           (apply #'concatenate float-vector equality-vector-list)))
                ;; W2
-               (input-weight-matrix (apply #'concatenate-matrix-diagonal input-weight-matrix-list))
+               (input-weight-matrix (if move-blocking-matrix
+                                        (m* (m* (transpose move-blocking-matrix) (apply #'concatenate-matrix-diagonal input-weight-matrix-list))
+                                            move-blocking-matrix)
+                                      (apply #'concatenate-matrix-diagonal input-weight-matrix-list)))
                ;; B^T W1
                (projected-error-weight-matrix (m* (transpose total-input-matrix) error-weight-matrix))
                ;; A x0
@@ -336,6 +389,42 @@
                 (if use-output-matrix
                     (m* projected-output-error-weight-matrix total-feedforward-matrix)))
                )
+           ;;(format-array total-equality-matrix)
+           (when move-blocking-matrix
+           (setq total-equality-matrix
+                 (make-matrix
+                  (length move-blocking-param) (array-dimension total-equality-matrix 1)
+                  (let ((idx 0))
+                    (mapcar #'(lambda (x)
+                                (prog1
+                                    (matrix-row total-equality-matrix idx)
+                                  (setq idx (+ idx x))))
+                            move-blocking-param))))
+           (setq total-equality-vector
+                 (apply
+                  #'concatenate
+                  float-vector
+                  (let ((idx 0))
+                    (mapcar #'(lambda (x)
+                                (prog1
+                                    (float-vector (elt total-equality-vector idx))
+                                  (setq idx (+ idx x))))
+                            move-blocking-param)))))
+           ;;(read-line)
+           ;; (setq total-equality-matrix
+           ;;       (array-dimensions total-equality-matrix))
+           ;; (when (find 'contact-limbs (mapcar #'car (send (car param-list) :slots)))
+           ;;   (print (list (array-dimensions (if use-output-matrix
+           ;;                                    (m+ (m+ error-eval-weight-matrix input-weight-matrix) output-eval-weight-matrix)
+           ;;                                  (m+ error-eval-weight-matrix input-weight-matrix)))
+           ;;              (length (if use-output-matrix
+           ;;                          (v+ error-eval-coeff-vector output-eval-coeff-vector)
+           ;;                        error-eval-coeff-vector))
+           ;;              (array-dimensions total-inequality-matrix)
+           ;;              (length total-inequality-min-vector)
+           ;;              (array-dimensions total-equality-matrix)
+           ;;              (length total-equality-vector))))
+           ;;(format-array total-equality-matrix)
            (setq total-input-value-vector
                  (solve-qpoases-qp
                   :eval-weight-matrix
@@ -372,13 +461,15 @@
            (setq input-value-list nil state-value-list nil output-value-list nil)
            (dotimes (i preview-window)
              (let ((idim (send (elt param-list i) :input-dim)))
-               (push (subseq total-input-value-vector tmp-count (+ tmp-count idim)) input-value-list)
+               (unless move-blocking-matrix (push (subseq total-input-value-vector tmp-count (+ tmp-count idim)) input-value-list))
                (push (subseq state-values (* i state-dim) (* (1+ i) state-dim)) state-value-list)
                (if use-output-matrix
                    (push (subseq output-values (* i output-dim) (* (1+ i) output-dim)) output-value-list))
                (setq tmp-count (+ tmp-count idim))
                ))
            (setq input-value-list (reverse input-value-list) state-value-list (reverse state-value-list))
+           (if move-blocking-matrix
+               (setq input-value-list (send self :extract-input-list total-input-value-vector param-list)))
            (if use-output-matrix
                (setq output-value-list (reverse output-value-list)))
            )))
@@ -391,6 +482,52 @@
        (incf counter)
        total-input-value-vector
        )))
+  (:calc-move-blocking-matrix
+   (move-blocking-param input-dim-list contact-limbs-list)
+   (let ((idx 0))
+     (apply
+      #'concatenate-matrix-diagonal
+      (mapcar #'(lambda (x)
+                  (let* ((tmp (subseq input-dim-list idx (+ idx x)))
+                         (tmpcl (subseq contact-limbs-list idx (+ idx x)))
+                         (min-dim (apply #'min tmp))
+                         (min-cl (find-extream tmpcl #'length #'<))
+                         (min-dim2 (/ min-dim (length min-cl))))
+                    (setq idx (+ idx x))
+                    ;;(print (list tmpcl min-cl))
+                    (apply
+                     #'concatenate-matrix-column
+                     (mapcar #'(lambda (dim cll) ;; dim1 cll1
+                                 (apply
+                                  #'concatenate-matrix-column
+                                  (mapcar #'(lambda (cl)
+                                              (apply #'concatenate-matrix-row
+                                                     (mapcar #'(lambda (mcl)
+                                                                 (if (eq cl mcl)
+                                                                     (unit-matrix min-dim2)
+                                                                   (make-matrix min-dim2 min-dim2)))
+                                                             min-cl))
+                                              )
+                                          cll)))
+                             tmp tmpcl) ;; (list dim1 dim2), (list cll1 cll2)
+                     )))
+              move-blocking-param)))
+   )
+  (:extract-input-list
+   (total-input-value-vector param-list)
+   (let ((idx 0) (count 0))
+     (apply
+      #'append
+      (mapcar #'(lambda (x)
+                  (let* ((tmp (subseq param-list idx (+ idx x)))
+                         (min-dim (apply #'min (send-all tmp :input-dim))))
+                    (prog1
+                        (mapcar #'(lambda (ttmp)
+                                    (subseq total-input-value-vector count (+ min-dim count)))
+                                tmp)
+                      (setq idx (+ idx x) count (+ min-dim count))
+                      )))
+              move-blocking-param))))
   (:set-param-list
    (prm-list)
    "Set parameter list."
