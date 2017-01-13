@@ -2,8 +2,8 @@ eus_qp
 =====================
 
 ## Features
-  * [QP and optimization library and Euslisp bindings] (#QP and optimization library and Euslisp bindings)
-  * [Euslisp libraries using optimization] (#Euslisp libraries using optimization)
+  * [QP and optimization library and Euslisp bindings] (##QP and optimization library and Euslisp bindings)
+  * [Euslisp libraries using optimization] (##Euslisp libraries using optimization)
 
 ## QP and optimization library and Euslisp bindings
   * [eus + eiquadprog] (https://github.com/jsk-ros-pkg/jsk_control/blob/master/eus_qp/euslisp/eiquadprog.l)
